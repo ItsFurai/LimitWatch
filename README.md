@@ -12,7 +12,7 @@ See your Claude and ChatGPT (Codex) usage limits in the terminal, and get a fore
 
 <img src="docs/screenshot.svg" alt="limitwatch showing a Claude session limit that will run out in 39 minutes, a tight weekly limit, and Codex limits that are on track" width="900">
 
-[Install](#install) · [Usage](#usage) · [Reading the dashboard](#reading-the-dashboard) · [How the forecast works](#how-the-forecast-works) · [Where the numbers come from](#where-the-numbers-come-from) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
+[Install](#install) · [Usage](#usage) · [Reading the dashboard](#reading-the-dashboard) · [Commands](#commands) · [How the forecast works](#how-the-forecast-works) · [Where the numbers come from](#where-the-numbers-come-from) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -22,7 +22,9 @@ See your Claude and ChatGPT (Codex) usage limits in the terminal, and get a fore
 - **A forecast, not just a percentage.** For each limit you get a verdict, *on track*, *tight* or *runs out in ~40m*, plus how much will be left at the reset.
 - **Knows your pace.** It compares your average pace since the window started with your pace over the last stretch, and shows the range between them.
 - **Tells you how to make it.** A *budget* pace for each limit: stay under it and you'll last until the reset.
-- **Live dashboard.** Refreshes every minute, with a timeline of how each window has gone so far.
+- **Live dashboard.** Refreshes every minute, with a timeline of how each window has gone so far, and right away when Claude Code refreshes its sign-in or Codex logs a new message.
+- **Knows what's running.** Shows which Claude and ChatGPT apps are open, and when a limit can't be read, tells you exactly what to do about it.
+- **A command bar.** Switch providers, change the refresh rate, sign in again or run any shell command without leaving the dashboard.
 - **Scriptable.** `limitwatch status --json` for scripts, and `limitwatch statusline` for a shell prompt or Claude Code's status line.
 - **Nothing to configure.** It reads the sign-ins Claude Code and Codex already have. It never stores, refreshes or sends your tokens anywhere except the provider's own API.
 - **One small binary.** About 8 MB, no runtime or C dependencies, for Windows, macOS and Linux on x86-64 and ARM64.
@@ -113,14 +115,34 @@ The bar and verdict are colored by the forecast:
 | `✕ limit reached` | red | already at 100%, and when it comes back |
 | `○ idle` | blue | the window hasn't started, or nothing is used yet |
 
+Each box's title also shows which of the provider's apps are running, such as `● desktop app, Claude Code`. When a limit can't be read, the line starting with `→` says what to do next.
+
 ### Keys
 
 | Key | Action |
 |---|---|
+| `:` · `/` | open the command bar |
+| `!` | open the command bar for a shell command |
 | `r` | refresh now |
 | `↑` `↓` · wheel | scroll |
 | `?` | help |
 | `q` · `esc` | quit |
+
+## Commands
+
+Press `:` or `/`, type a command and press `enter`. `tab` completes it, `↑` `↓` go through the ones you've used, and `esc` closes the bar.
+
+| Command | Action |
+|---|---|
+| `refresh` | check every limit now |
+| `provider claude` · `provider codex` · `provider all` | choose which providers to show |
+| `every 30s` | change how often it refreshes (30 seconds at the least) |
+| `login claude` | open Claude Code here, which refreshes its sign-in; `/exit` brings you back |
+| `login codex` | run `codex login` here |
+| `!<command>` | run any shell command, such as `!codex login --help`; press `enter` afterward to come back |
+| `help` · `quit` | show the help screen · leave |
+
+Shell commands run in PowerShell on Windows and in your `$SHELL` elsewhere. When one finishes, limitwatch refreshes, so a new sign-in shows up right away.
 
 ## How the forecast works
 
@@ -144,7 +166,20 @@ Neither provider has a public API for subscription limits, so limitwatch reads t
 | **Claude** | The usage endpoint behind Claude Code's `/usage` screen, signed in with the token Claude Code saved in `~/.claude/.credentials.json` (the login keychain on macOS). Set `CLAUDE_CONFIG_DIR` if yours lives elsewhere, or `CLAUDE_CODE_OAUTH_TOKEN` to use a token from `claude setup-token`. |
 | **Codex** | The usage endpoint behind Codex's `/status`, signed in with `~/.codex/auth.json` (`CODEX_HOME` to override). If that fails, it falls back to the latest rate-limit snapshot in Codex's session logs, which is as fresh as your last Codex message. |
 
-limitwatch only **reads** these sign-ins. It never refreshes them, so if one has expired it tells you to open Claude Code or run `codex` once, and the next refresh works. The Claude desktop app keeps its own sign-in, so if you only use the desktop app, run `claude` in a terminal now and then.
+limitwatch only **reads** these sign-ins. It never refreshes them, so if one has expired it tells you what to do, usually `login claude` or `login codex` in the command bar.
+
+### Apps that are running
+
+limitwatch checks which apps are open, by process name and path, and uses that to help:
+
+| Running | What happens |
+|---|---|
+| **Claude Code** in a terminal or editor | It refreshes its sign-in as it works, and limitwatch notices the change and refreshes within a couple of seconds. |
+| **Codex** | It logs your current limits after every message. limitwatch refreshes as soon as a new one is written, and uses it when the live check fails. A reading from the last 15 minutes counts as current; older ones are shown with a warning. |
+| **Claude desktop app** | It keeps its sign-in to itself, encrypted, so limitwatch can't use it. Run `login claude` now and then to keep Claude Code's sign-in fresh. |
+| **ChatGPT desktop app** | It doesn't share its sign-in or its message limits either. |
+
+limitwatch never reads other apps' memory or their encrypted storage.
 
 These endpoints are unofficial and may change. If a provider changes its reply, limitwatch shows an error for that provider rather than wrong numbers. Please [open an issue](https://github.com/ItsFurai/LimitWatch/issues/new?template=bug_report.yml).
 

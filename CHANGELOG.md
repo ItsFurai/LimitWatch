@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **A command bar** in the dashboard: press `:` or `/` to type `refresh`, `provider codex`, `every 30s`, `login claude`, `login codex`, `help` or `quit`, with tab completion and history. `!<command>` runs any shell command and comes back afterward.
+- **Running apps:** each provider shows which of its apps are open (the Claude desktop app, Claude Code, Codex, the ChatGPT app), and a limit that can't be read comes with the next step to fix it, in the dashboard, `status` and `--json`.
+- **Instant updates:** the dashboard refreshes within a couple of seconds when Claude Code refreshes its sign-in or Codex logs a new message.
+
+### Changed
+- When the live Codex check fails, a reading from Codex's log in the last 15 minutes is shown as current; older readings carry a warning that they may be out of date.
+- Errors are shorter, and the steps to fix them moved to their own line.
+
 ## [0.1.0] - 2026-10-10
 
 ### Added

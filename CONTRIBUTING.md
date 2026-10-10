@@ -38,10 +38,12 @@ Everything lives in `cmd/limitwatch`:
 | `limits.go` | the `Limit` and `Report` types, fetching every provider, the cache |
 | `claude.go` | Claude: reading Claude Code's sign-in and the usage endpoint |
 | `codex.go` | Codex: reading Codex's sign-in, the usage endpoint and session logs |
+| `procs.go`, `procs_*.go` | finding the Claude and ChatGPT apps that are running, and the hints based on them |
 | `history.go` | recorded readings |
 | `forecast.go` | paces, projections and verdicts |
 | `render.go` | the limit rows, `status` and `statusline` output |
 | `tui.go`, `style.go` | the dashboard, colors and help screen |
+| `commands.go` | the command bar, `login`, shell commands, and watching for new readings |
 | `demo.go` | made-up data for `--demo` and the screenshot |
 
 ### Adding a provider
@@ -95,7 +97,7 @@ Also:
 
 - Add or update tests for behavior changes.
 - Add a line to the **Unreleased** section of [CHANGELOG.md](CHANGELOG.md) for anything users will notice.
-- Update the README and the `?` help screen if you change commands, keys or the forecast.
+- Update the README and the `?` help screen if you change commands, keys or the forecast. The help screen lists commands from `commands` in `commands.go`.
 - To refresh the README screenshot, run `LIMITWATCH_SCREENSHOT=../../docs go test -run TestScreenshot ./cmd/limitwatch` and then `freeze --language ansi docs/dashboard.ansi -o docs/screenshot.svg`.
 - Keep pull requests focused: one change per PR is much easier to review.
 
