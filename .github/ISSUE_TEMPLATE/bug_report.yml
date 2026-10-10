@@ -1,0 +1,55 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report this! For security problems, please use the [private reporting form](https://github.com/ItsFurai/LimitWatch/security/advisories/new) instead. Please don't paste tokens or the contents of `.credentials.json` or `auth.json`.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: My session limit showed 40% but Claude Code's /usage said…
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `limitwatch status`
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: limitwatch version
+      description: Output of `limitwatch --version`
+      placeholder: limitwatch v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      multiple: true
+      options: [Claude, Codex / ChatGPT, Other]
+    validations:
+      required: true
+  - type: input
+    id: plan
+    attributes:
+      label: Plan
+      placeholder: Claude Max 5x, ChatGPT Plus…
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, error messages, or the output of `limitwatch status --json` (it contains no secrets).
