@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ["1.24", "stable"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - name: staticcheck
+        if: runner.os == 'Linux' && matrix.go == 'stable'
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+      - run: go test ./...
+      - name: race detector
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+      - run: go build -o limitwatch-bin ./cmd/limitwatch
