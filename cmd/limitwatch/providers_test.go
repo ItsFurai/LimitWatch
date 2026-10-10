@@ -128,7 +128,7 @@ func TestCodexFromLogs(t *testing.T) {
 `
 	os.WriteFile(filepath.Join(dir, "rollout-2026-a.jsonl"), []byte(log), 0o644)
 
-	r, ok := codexFromLogs(now)
+	r, at, ok := codexFromLogs(now)
 	if !ok || len(r.Limits) != 2 {
 		t.Fatalf("ok=%v %+v", ok, r)
 	}
@@ -139,7 +139,10 @@ func TestCodexFromLogs(t *testing.T) {
 	if s := r.Limits[1]; s.Used != 0 || !s.ResetsAt.IsZero() {
 		t.Fatalf("secondary %+v", s)
 	}
-	if !strings.Contains(r.Source, "session log") {
+	if now.Sub(at).Round(time.Minute) != 10*time.Minute {
+		t.Fatalf("reading time %v", at)
+	}
+	if !strings.Contains(r.Source, "Codex's log, 10m ago") {
 		t.Fatalf("source %q", r.Source)
 	}
 }

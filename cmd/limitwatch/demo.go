@@ -11,7 +11,7 @@ func demoReports(now time.Time) []Report {
 	h := time.Hour
 	return []Report{
 		{
-			Provider: "Claude", Plan: "Max 5x", Fetched: now,
+			Provider: "Claude", Plan: "Max 5x", Fetched: now, Running: []string{"desktop app", "Claude Code"},
 			Limits: []Limit{
 				{ID: "claude/five_hour", Name: "Session", Used: 78, Window: 5 * h, ResetsAt: now.Add(100 * time.Minute)},
 				{ID: "claude/seven_day", Name: "Weekly", Used: 42, Window: 7 * 24 * h, ResetsAt: now.Add(76 * h)},
@@ -19,7 +19,7 @@ func demoReports(now time.Time) []Report {
 			},
 		},
 		{
-			Provider: "Codex", Plan: "Plus", Fetched: now,
+			Provider: "Codex", Plan: "Plus", Fetched: now, Running: []string{"Codex"},
 			Limits: []Limit{
 				{ID: "codex/primary", Name: "5-hour", Used: 23, Window: 5 * h, ResetsAt: now.Add(3*h + 12*time.Minute)},
 				{ID: "codex/secondary", Name: "Weekly", Used: 12, Window: 7 * 24 * h, ResetsAt: now.Add(5*24*h + 2*h)},

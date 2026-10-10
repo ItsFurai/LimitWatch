@@ -19,10 +19,11 @@ import (
 // ChatGPT plans (Codex) report usage through the endpoint Codex's /status
 // reads, authorized with the sign-in Codex keeps in ~/.codex/auth.json.
 // When that fails, the rate-limit snapshot Codex writes into its session
-// logs is used instead.
+// logs after every message is used instead.
 var codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
 
-const codexSignIn = "run `codex login` to sign in again"
+// codexLogFresh is how old a log reading can be and still count as current.
+const codexLogFresh = 15 * time.Minute
 
 func codexHome() string {
 	if d := os.Getenv("CODEX_HOME"); d != "" {
@@ -47,10 +48,7 @@ func fetchCodex(ctx context.Context) Report {
 	}
 	if err != nil || auth.Tokens == nil || auth.Tokens.AccessToken == "" {
 		// API-key logins have no plan limits, but session logs may still have some.
-		if fromLogs, ok := codexFromLogs(time.Now()); ok {
-			return fromLogs
-		}
-		return failed("Codex", errMissing{"not signed in to Codex with ChatGPT"})
+		return codexFallback(errMissing{"not signed in to Codex with ChatGPT"})
 	}
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, codexUsageURL, nil)
@@ -67,16 +65,28 @@ func fetchCodex(ctx context.Context) Report {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		if resp.StatusCode != http.StatusOK {
-			err = statusError(resp.StatusCode, codexSignIn)
+			err = statusError(resp.StatusCode)
 		} else {
 			r.Plan, r.Limits, err = parseCodexUsage(body, time.Now())
 		}
 	}
 	if err != nil {
-		if fromLogs, ok := codexFromLogs(time.Now()); ok {
-			return fromLogs
-		}
-		r.Err = err.Error()
+		return codexFallback(err)
+	}
+	return r
+}
+
+// codexFallback uses the newest reading from Codex's logs after the live
+// check failed with err. A recent reading is as good as a live one, so the
+// error is only shown when the reading is getting old.
+func codexFallback(err error) Report {
+	now := time.Now()
+	r, at, ok := codexFromLogs(now)
+	if !ok {
+		return failed("Codex", err)
+	}
+	if now.Sub(at) > codexLogFresh {
+		r.Err = "live check failed (" + err.Error() + "), so these numbers may be out of date"
 	}
 	return r
 }
@@ -142,14 +152,14 @@ func windowName(w time.Duration, slot int) string {
 // codexFromLogs reads the newest rate-limit snapshot from Codex's session
 // logs (sessions/YYYY/MM/DD/rollout-*.jsonl). It's only as fresh as your
 // last Codex message, so the report says how old it is.
-func codexFromLogs(now time.Time) (Report, bool) {
+func codexFromLogs(now time.Time) (Report, time.Time, bool) {
 	files := recentRollouts(filepath.Join(codexHome(), "sessions"), now, 8)
 	for _, f := range files {
 		ts, rl, ok := lastRateLimits(f)
 		if !ok {
 			continue
 		}
-		r := Report{Provider: "Codex", Fetched: now, Source: "from session log, " + humanAge(ts, now)}
+		r := Report{Provider: "Codex", Fetched: now, Source: "from Codex's log, " + humanAge(ts, now)}
 		for i, w := range []*codexLogWindow{rl.Primary, rl.Secondary} {
 			if w == nil {
 				continue
@@ -167,10 +177,10 @@ func codexFromLogs(now time.Time) (Report, bool) {
 			r.Limits = append(r.Limits, l)
 		}
 		if len(r.Limits) > 0 {
-			return r, true
+			return r, ts, true
 		}
 	}
-	return Report{}, false
+	return Report{}, time.Time{}, false
 }
 
 type codexLogWindow struct {

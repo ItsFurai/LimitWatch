@@ -90,11 +90,15 @@ func timeline(l Limit, f Forecast, samples []Sample, now time.Time, w int) strin
 
 // reportLines renders a provider's limits, or why there are none.
 func reportLines(r Report, hist History, now time.Time, w int) []string {
+	var hint []string
+	if r.Hint != "" {
+		hint = []string{" " + sKey.Render("→ ") + sDim.Render(r.Hint)}
+	}
 	switch {
 	case r.Missing:
-		return []string{" " + sDim.Render(r.Err)}
+		return append([]string{" " + sDim.Render(r.Err)}, hint...)
 	case len(r.Limits) == 0 && r.Err != "":
-		return []string{" " + sErr.Render("⚠ "+r.Err)}
+		return append([]string{" " + sErr.Render("⚠ "+r.Err)}, hint...)
 	}
 	var lines []string
 	for i, l := range r.Limits {
@@ -104,7 +108,7 @@ func reportLines(r Report, hist History, now time.Time, w int) []string {
 		lines = append(lines, limitLines(l, Predict(l, hist.inWindow(l), now), hist.inWindow(l), now, w)...)
 	}
 	if r.Err != "" {
-		lines = append(lines, "", " "+sErr.Render("⚠ "+r.Err))
+		lines = append(append(lines, "", " "+sErr.Render("⚠ "+r.Err)), hint...)
 	}
 	return lines
 }
@@ -116,6 +120,9 @@ func reportInfo(r Report) string {
 	}
 	if r.Source != "" {
 		parts = append(parts, r.Source)
+	}
+	if len(r.Running) > 0 {
+		parts = append(parts, "● "+strings.Join(r.Running, ", "))
 	}
 	return strings.Join(parts, " · ")
 }

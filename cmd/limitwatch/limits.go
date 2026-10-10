@@ -55,6 +55,8 @@ type Report struct {
 	Err      string    `json:"error,omitempty"`
 	Missing  bool      `json:"missing,omitempty"` // not signed in; shown dimmed, not as an error
 	Fetched  time.Time `json:"fetched"`
+	Running  []string  `json:"running,omitempty"` // this provider's apps that are open now
+	Hint     string    `json:"hint,omitempty"`    // the next step when the limits couldn't be read
 }
 
 type Provider struct {
@@ -121,7 +123,7 @@ func fetchAll(ctx context.Context, ps []Provider, maxAge time.Duration) []Report
 	}
 	if maxAge > 0 {
 		if cached, ok := loadCache(ps, maxAge); ok {
-			return cached
+			return annotate(cached)
 		}
 	}
 	reports := make([]Report, len(ps))
@@ -137,6 +139,21 @@ func fetchAll(ctx context.Context, ps []Provider, maxAge time.Duration) []Report
 	wg.Wait()
 	_ = saveCache(reports)
 	_ = recordHistory(reports)
+	return annotate(reports)
+}
+
+// inDashboard words hints as commands typed in the dashboard rather than
+// shell commands.
+var inDashboard bool
+
+// annotate adds which apps are running and, for a provider that failed, what
+// to do about it. It runs after caching, so both are always current.
+func annotate(reports []Report) []Report {
+	running := detectRunning()
+	for i := range reports {
+		reports[i].Running = running.labels(reports[i].Provider)
+		reports[i].Hint = running.hint(reports[i], inDashboard)
+	}
 	return reports
 }
 
@@ -201,12 +218,12 @@ func saveCache(reports []Report) error {
 var httpClient = &http.Client{Timeout: 15 * time.Second}
 
 // statusError turns an HTTP failure into a short message for the UI.
-func statusError(code int, signInHint string) error {
+func statusError(code int) error {
 	switch {
 	case code == http.StatusUnauthorized:
-		return errors.New("sign-in expired — " + signInHint)
+		return errors.New("sign-in expired or revoked")
 	case code == http.StatusForbidden:
-		return errors.New("the usage API refused the request (HTTP 403) — " + signInHint)
+		return errors.New("the usage API refused the sign-in (HTTP 403)")
 	case code == http.StatusTooManyRequests:
 		return errors.New("usage API is rate limiting requests; try again in a minute")
 	case code >= 500:

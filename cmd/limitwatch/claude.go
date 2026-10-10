@@ -22,8 +22,6 @@ import (
 // limitwatch only reads that token; it never refreshes or rewrites it.
 var claudeUsageURL = "https://api.anthropic.com/api/oauth/usage"
 
-const claudeSignIn = "open Claude Code once (or run `claude`) to refresh it"
-
 type claudeCreds struct {
 	AccessToken      string `json:"accessToken"`
 	ExpiresAt        int64  `json:"expiresAt"` // Unix milliseconds
@@ -68,7 +66,7 @@ func fetchClaude(ctx context.Context) Report {
 	}
 	r := Report{Provider: "Claude", Plan: claudePlan(creds), Fetched: time.Now()}
 	if creds.ExpiresAt > 0 && time.UnixMilli(creds.ExpiresAt).Before(time.Now()) {
-		r.Err = "Claude Code's saved sign-in expired " + humanAge(time.UnixMilli(creds.ExpiresAt), time.Now()) + " — " + claudeSignIn
+		r.Err = "Claude Code's saved sign-in expired " + humanAge(time.UnixMilli(creds.ExpiresAt), time.Now())
 		return r
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, claudeUsageURL, nil)
@@ -84,7 +82,7 @@ func fetchClaude(ctx context.Context) Report {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		r.Err = statusError(resp.StatusCode, claudeSignIn).Error()
+		r.Err = statusError(resp.StatusCode).Error()
 		return r
 	}
 	r.Limits, err = parseClaudeUsage(body)
