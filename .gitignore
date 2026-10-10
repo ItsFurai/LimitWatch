@@ -1,0 +1,7 @@
+*.exe
+*.test
+*.tmp
+
+*~
+docs/*.ansi
+/limitwatch
