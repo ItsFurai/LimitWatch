@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 )
 
@@ -29,8 +28,11 @@ const (
 // and Claude Code are both "claude.exe" on Windows; the desktop app lives in
 // its install folder and runs its own copy of Claude Code from its data folder.
 func classify(p proc) appKind {
-	name := strings.ToLower(strings.TrimSuffix(filepath.Base(p.Name), filepath.Ext(p.Name)))
-	path := strings.ToLower(filepath.ToSlash(p.Path))
+	// Normalize by hand rather than with path/filepath, so Windows paths
+	// classify the same way on every OS (and in tests).
+	name := strings.ToLower(p.Name[strings.LastIndexAny(p.Name, `/\`)+1:])
+	name = strings.TrimSuffix(name, ".exe")
+	path := strings.ToLower(strings.ReplaceAll(p.Path, `\`, "/"))
 	switch {
 	case name == "claude":
 		switch {
