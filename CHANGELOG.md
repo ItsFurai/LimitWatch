@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-14
+
 ### Added
 - **Nine more providers:** GitHub Copilot (monthly quotas, through the GitHub CLI), Gemini CLI (daily quotas per model), Kimi Code (5-hour and weekly quotas), Z.ai / Zhipu GLM Coding Plan, the DeepSeek, Kimi (Moonshot) and OpenRouter balances, and OpenAI and Anthropic API spend this month.
 - **Balances:** prepaid credit shows the amount left, a week of history, and how long it lasts at your spending over the last week. Top-ups don't count as spending.
@@ -34,5 +36,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `--provider` to pick providers, and `--demo` to try it with made-up numbers.
 - Prebuilt downloads for Windows, macOS and Linux (x86-64 and ARM64) with checksums, and `go install` support.
 
-[Unreleased]: https://github.com/ItsFurai/LimitWatch/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ItsFurai/LimitWatch/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ItsFurai/LimitWatch/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ItsFurai/LimitWatch/releases/tag/v0.1.0
