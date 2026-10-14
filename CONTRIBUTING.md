@@ -106,7 +106,6 @@ Also:
 - Add or update tests for behavior changes.
 - Add a line to the **Unreleased** section of [CHANGELOG.md](CHANGELOG.md) for anything users will notice.
 - Update the README and the `?` help screen if you change commands, keys or the forecast. The help screen lists commands from `commands` in `commands.go`.
-- To refresh the README screenshot, run `LIMITWATCH_SCREENSHOT=../../docs go test -run TestScreenshot ./cmd/limitwatch` and then `freeze --language ansi docs/dashboard.ansi -o docs/screenshot.svg`.
 - Keep pull requests focused: one change per PR is much easier to review.
 
 ## Releasing (maintainers)

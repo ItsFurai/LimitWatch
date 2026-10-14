@@ -3,5 +3,4 @@
 *.tmp
 
 *~
-docs/*.ansi
 /limitwatch

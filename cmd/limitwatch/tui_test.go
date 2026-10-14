@@ -1,16 +1,12 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 func feed(m tea.Model, msg tea.Msg) tea.Model {
@@ -61,24 +57,5 @@ func TestStatusline(t *testing.T) {
 	got := ansi.Strip(renderStatusline(reports, demoHistory(reports, now), now))
 	if !strings.HasPrefix(got, "5h 78% ⚠") || !strings.Contains(got, "7d 42% ◐") {
 		t.Fatalf("statusline %q", got)
-	}
-}
-
-// TestScreenshot renders the dashboard with demo data and writes the raw
-// ANSI frame for docs/. It only runs when asked:
-//
-//	LIMITWATCH_SCREENSHOT=../../docs go test -run TestScreenshot ./cmd/limitwatch
-//	freeze --language ansi docs/dashboard.ansi -o docs/screenshot.svg
-func TestScreenshot(t *testing.T) {
-	out := os.Getenv("LIMITWATCH_SCREENSHOT")
-	if out == "" {
-		t.Skip("set LIMITWATCH_SCREENSHOT=<dir> to regenerate the README screenshot")
-	}
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	lipgloss.SetHasDarkBackground(true)
-	m := demoModel(t, 118, 80)
-	m = feed(m, tea.WindowSizeMsg{Width: 118, Height: len(m.(model).bodyLines()) + 2})
-	if err := os.WriteFile(filepath.Join(out, "dashboard.ansi"), []byte(m.View()), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
