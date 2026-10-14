@@ -11,10 +11,11 @@ import (
 // Sample is one recorded reading of a limit. The history is a small JSON
 // Lines file; the forecast reads it to measure your recent pace.
 type Sample struct {
-	T     int64   `json:"t"` // Unix seconds
-	ID    string  `json:"id"`
-	Used  float64 `json:"used"`
-	Reset int64   `json:"reset,omitempty"` // Unix seconds; identifies the window
+	T      int64   `json:"t"` // Unix seconds
+	ID     string  `json:"id"`
+	Used   float64 `json:"used"`
+	Amount float64 `json:"amt,omitempty"`   // the limit's amount, for balances and spend
+	Reset  int64   `json:"reset,omitempty"` // Unix seconds; identifies the window
 }
 
 func (s Sample) Time() time.Time { return time.Unix(s.T, 0) }
@@ -57,7 +58,7 @@ func recordHistory(reports []Report) error {
 	var lines []byte
 	for _, r := range reports {
 		for _, l := range r.Limits {
-			s := Sample{T: r.Fetched.Unix(), ID: l.ID, Used: l.Used}
+			s := Sample{T: r.Fetched.Unix(), ID: l.ID, Used: l.Used, Amount: l.Amount}
 			if !l.ResetsAt.IsZero() {
 				s.Reset = l.ResetsAt.Unix()
 			}
@@ -106,8 +107,12 @@ func compactHistory() {
 }
 
 // inWindow returns the samples that belong to the same window as l: same
-// reset time (give or take a few minutes, as providers round it).
+// reset time (give or take a few minutes, as providers round it). A balance
+// has no window, so it gets the last week of readings.
 func (h History) inWindow(l Limit) []Sample {
+	if l.Kind == KindBalance {
+		return h[l.ID]
+	}
 	if l.ResetsAt.IsZero() {
 		return nil
 	}

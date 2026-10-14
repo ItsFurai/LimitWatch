@@ -46,6 +46,12 @@ const tightAt = 90.0
 // The recent pace drives the verdict when it's known, since it reflects how
 // you're working right now; the average gives the other end of the range.
 func Predict(l Limit, samples []Sample, now time.Time) Forecast {
+	switch {
+	case l.Kind == KindBalance:
+		return predictBalance(l, samples, now)
+	case l.Kind == KindSpend && l.Total <= 0:
+		return predictSpend(l, now)
+	}
 	var f Forecast
 	if l.Used >= 100 {
 		f.Verdict = Maxed
@@ -92,6 +98,79 @@ func Predict(l Limit, samples []Sample, now time.Time) Forecast {
 	default:
 		f.Verdict = OnTrack
 	}
+	return f
+}
+
+// Balances never reset, so the question is how long they last. Spending is
+// the sum of the drops between readings over the last week; a rise is a
+// top-up and doesn't count. Rate is then in the balance's currency per hour.
+const (
+	balanceLookback = 7 * 24 * time.Hour
+	balanceRunsOut  = 3 * 24 * time.Hour  // red below this
+	balanceTight    = 14 * 24 * time.Hour // orange below this
+)
+
+func predictBalance(l Limit, samples []Sample, now time.Time) Forecast {
+	var f Forecast
+	if l.Amount <= 0 {
+		f.Verdict = Maxed
+		return f
+	}
+	var first time.Time
+	prev, spent, n := math.NaN(), 0.0, 0
+	for _, s := range samples {
+		t := s.Time()
+		if t.Before(now.Add(-balanceLookback)) || t.After(now) {
+			continue
+		}
+		if n == 0 {
+			first = t
+		} else if s.Amount < prev {
+			spent += prev - s.Amount
+		}
+		prev = s.Amount
+		n++
+	}
+	if n > 0 && l.Amount < prev {
+		spent += prev - l.Amount
+	}
+	if n == 0 || now.Sub(first) < time.Hour {
+		f.Verdict = Idle // not enough readings to know the spend rate yet
+		return f
+	}
+	f.HasRecent = true
+	f.Rate = spent / now.Sub(first).Hours()
+	f.RecentRate = f.Rate
+	if f.Rate <= 0 {
+		f.Verdict = OnTrack
+		return f
+	}
+	f.EmptyIn = time.Duration(l.Amount / f.Rate * float64(time.Hour))
+	switch {
+	case f.EmptyIn < balanceRunsOut:
+		f.Verdict = RunsOut
+	case f.EmptyIn < balanceTight:
+		f.Verdict = Tight
+	default:
+		f.Verdict = OnTrack
+	}
+	return f
+}
+
+// predictSpend projects a month's API spend when there's no budget to
+// measure it against. AtReset and the rates are in currency, not percent.
+func predictSpend(l Limit, now time.Time) Forecast {
+	f := Forecast{Verdict: Idle}
+	if !l.ResetsAt.After(now) {
+		return f
+	}
+	f.Left = l.ResetsAt.Sub(now)
+	if elapsed := (l.Window - f.Left).Hours(); elapsed >= 1 {
+		f.AvgRate = l.Amount / elapsed
+	}
+	f.Rate = f.AvgRate
+	f.AtReset = l.Amount + f.Rate*f.Left.Hours()
+	f.Low, f.High = f.AtReset, f.AtReset
 	return f
 }
 

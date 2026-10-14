@@ -1,17 +1,21 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/term"
 )
 
-const usage = `limitwatch — your AI plan limits, and whether they'll last until the reset
+const usage = `limitwatch — your AI limits and balances, and whether they'll last
 
 USAGE
   limitwatch                  open the live dashboard
@@ -23,16 +27,21 @@ USAGE
   limitwatch watch [-v]       keep recording usage in the background, so forecasts
                                 know your recent pace (Ctrl+C to stop)
       --every 5m                how often to record
+  limitwatch providers        list every provider and whether it's set up
+  limitwatch key set <p>      save an API key (asked for without echoing it)
+  limitwatch key list         show which keys are set, and from where
+  limitwatch key remove <p>   forget a saved key
+  limitwatch budget <p> <n>   a monthly budget in USD for API spend (0 removes it)
   limitwatch --version
 
 OPTIONS (any command)
-  --provider claude,codex     only these providers
+  --provider claude,deepseek  only these providers (also shows them when not set up)
   --demo                      show made-up numbers, to try it out
 
 PROVIDERS
-  claude   Claude Pro / Max, read from Claude Code's sign-in (~/.claude)
-  codex    ChatGPT Plus / Pro, read from Codex's sign-in (~/.codex)
-
+%s
+Providers that aren't set up are hidden; ` + "`limitwatch providers`" + ` lists them.
+Config:  %s
 History: %s  (override with LIMITWATCH_HISTORY)
 `
 
@@ -79,14 +88,28 @@ func run(args []string) error {
 	}
 	switch cmd {
 	case "help":
-		fmt.Printf(usage, historyPath())
+		fmt.Printf(usage, providerTable(), configPath(), historyPath())
+		return nil
+	case "providers":
+		fmt.Print(providerTable())
+		return nil
+	case "key", "keys":
+		return cmdKey(rest[1:])
+	case "budget":
+		if len(rest) != 3 {
+			return fmt.Errorf("usage: limitwatch budget <%s> <amount in USD>", providerKeys(usesBudget))
+		}
+		if err := setBudget(rest[1], rest[2]); err != nil {
+			return err
+		}
+		fmt.Println("saved; limitwatch status shows the forecast")
 		return nil
 	case "version":
 		fmt.Println("limitwatch", version)
 		return nil
 	case "status":
 		_, asJSON := flags["json"]
-		return cmdStatus(ps, asJSON)
+		return cmdStatus(ps, asJSON, flags["provider"] != "")
 	case "statusline":
 		return cmdStatusline(ps, flags["provider"] != "")
 	case "watch":
@@ -101,7 +124,7 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return runTUI(ps, every)
+		return runTUI(ps, every, flags["provider"] != "")
 	}
 	return fmt.Errorf("unknown command %q — see `limitwatch --help`", cmd)
 }
@@ -159,7 +182,124 @@ type forecastJSON struct {
 	RunsOutAt   *time.Time `json:"runs_out_at,omitempty"`
 }
 
-func cmdStatus(ps []Provider, asJSON bool) error {
+// providerTable lists every provider, whether it's set up, and how.
+func providerTable() string {
+	var b strings.Builder
+	cfg := loadConfig()
+	for _, p := range providers {
+		how := "app sign-in"
+		if usesKey(p) {
+			how = sFaint.Render("key: " + strings.Join(p.KeyEnv, " or "))
+			if k, from := apiKey(p); k != "" {
+				how = sOK.Render("✓ key from " + from)
+			}
+			if p.Budget && cfg.Budgets[p.Key] > 0 {
+				how += sDim.Render(fmt.Sprintf(" · budget $%.0f", cfg.Budgets[p.Key]))
+			}
+		}
+		fmt.Fprintf(&b, "  %s %s  %s\n", sKey.Render(fmt.Sprintf("%-14s", p.Key)), sDim.Render(fmt.Sprintf("%-66s", p.About)), how)
+	}
+	return b.String()
+}
+
+func cmdKey(args []string) error {
+	sub := ""
+	if len(args) > 0 {
+		sub = args[0]
+	}
+	switch sub {
+	case "", "list", "ls":
+		fmt.Print(keyList())
+		return nil
+	case "set", "add":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: limitwatch key set <%s>", providerKeys(usesKey))
+		}
+		p, err := findProvider(args[1])
+		if err != nil {
+			return err
+		}
+		if !usesKey(p) {
+			return fmt.Errorf("%s uses its app's sign-in, not an API key", p.Name)
+		}
+		key, err := readSecret(fmt.Sprintf("%s API key (%s): ", p.Name, strings.Join(p.KeyEnv, " also works")))
+		if err != nil {
+			return err
+		}
+		if err := setKey(p.Key, key); err != nil {
+			return err
+		}
+		fmt.Printf("saved %s for %s in %s\n", maskKey(strings.TrimSpace(key)), p.Key, configPath())
+		return nil
+	case "remove", "rm", "delete":
+		if len(args) < 2 {
+			return errors.New("usage: limitwatch key remove <provider>")
+		}
+		if err := removeKey(args[1]); err != nil {
+			return err
+		}
+		fmt.Println("removed")
+		return nil
+	}
+	return fmt.Errorf("unknown key command %q (set, list or remove)", sub)
+}
+
+// readSecret asks for a key without echoing it. Piped input works too:
+// echo $KEY | limitwatch key set deepseek
+func readSecret(prompt string) (string, error) {
+	if term.IsTerminal(os.Stdin.Fd()) {
+		fmt.Fprint(os.Stderr, prompt)
+		b, err := term.ReadPassword(os.Stdin.Fd())
+		fmt.Fprintln(os.Stderr)
+		return string(b), err
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return "", errors.New("no key given")
+	}
+	return line, nil
+}
+
+// visible splits reports into those to show and the names of providers that
+// aren't set up. A provider asked for by name is always shown.
+func visible(reports []Report, explicit bool) ([]Report, []string) {
+	if explicit {
+		return reports, nil
+	}
+	var shown []Report
+	var missing []string
+	for _, r := range reports {
+		if r.Missing {
+			missing = append(missing, providerKeyOf(r.Provider))
+			continue
+		}
+		shown = append(shown, r)
+	}
+	return shown, missing
+}
+
+func providerKeyOf(name string) string {
+	for _, p := range providers {
+		if p.Name == name {
+			return p.Key
+		}
+	}
+	return strings.ToLower(name)
+}
+
+// notSetUp is the line under the providers listing the hidden ones.
+func notSetUp(missing []string) string {
+	if len(missing) == 0 {
+		return ""
+	}
+	how := "`limitwatch providers` shows how to add them"
+	if inDashboard {
+		how = "type `key <name>` or see `help`"
+	}
+	return sFaint.Render(" not set up: " + strings.Join(missing, ", ") + " · " + how)
+}
+
+func cmdStatus(ps []Provider, asJSON, explicit bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	reports := fetchAll(ctx, ps, 0)
@@ -199,7 +339,11 @@ func cmdStatus(ps []Provider, asJSON bool) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(out)
 	}
-	fmt.Print(renderStatus(reports, hist, now, termWidth()))
+	shown, missing := visible(reports, explicit)
+	fmt.Print(renderStatus(shown, hist, now, termWidth()))
+	if line := notSetUp(missing); line != "" {
+		fmt.Println("\n" + line)
+	}
 	return nil
 }
 

@@ -48,9 +48,42 @@ func verdictColor(v Verdict) lipgloss.AdaptiveColor {
 
 var verdictGlyph = map[Verdict]string{Idle: "○", OnTrack: "✓", Tight: "◐", RunsOut: "⚠", Maxed: "✕"}
 
-// verdictText is the one-line answer to "will this last until the reset?".
+// verdictText is the one-line answer to "will this last until the reset?",
+// or for a balance, "how long will it last?".
 func verdictText(l Limit, f Forecast) string {
 	g := verdictGlyph[f.Verdict] + " "
+	switch {
+	case l.Kind == KindBalance:
+		switch f.Verdict {
+		case Maxed:
+			return g + "out of credit"
+		case Idle:
+			return g + "spend rate after an hour of readings"
+		case RunsOut:
+			return g + "runs out in ~" + humanDur(f.EmptyIn)
+		}
+		if f.Rate <= 0 {
+			return g + "no spending in the last week"
+		}
+		return g + "lasts ~" + humanDur(f.EmptyIn)
+	case l.Kind == KindSpend && l.Total <= 0:
+		if f.Left == 0 {
+			return g + "no budget set"
+		}
+		return g + "~" + money(f.AtReset, l.Unit) + " by month end · no budget set"
+	case l.Kind == KindSpend:
+		end := fmt.Sprintf("~%s of %s by month end", money(f.AtReset/100*l.Total, l.Unit), money(l.Total, l.Unit))
+		switch f.Verdict {
+		case Maxed:
+			return g + "budget used up"
+		case RunsOut:
+			return g + fmt.Sprintf("over budget in ~%s · %s before month end", humanDur(f.EmptyIn), humanDur(f.Left-f.EmptyIn))
+		case Tight:
+			return g + "tight · " + end
+		case OnTrack:
+			return g + "on track · " + end
+		}
+	}
 	switch f.Verdict {
 	case Maxed:
 		if f.Left > 0 {
@@ -81,18 +114,110 @@ func atReset(f Forecast) string {
 
 // paceText explains the numbers behind the verdict.
 func paceText(l Limit, f Forecast) string {
+	switch {
+	case l.Kind == KindBalance:
+		if !f.HasRecent {
+			return "keep limitwatch open, or run `limitwatch watch`, to learn your spend rate"
+		}
+		return "spending " + money(f.Rate*24, l.Unit) + "/day over the last week"
+	case l.Kind == KindSpend && l.Total <= 0:
+		if f.AvgRate == 0 {
+			return ""
+		}
+		return money(f.AvgRate*24, l.Unit) + "/day avg · set one with `budget` to get a verdict"
+	case l.Kind == KindSpend && f.Left > 0:
+		perDay := func(pctPerHour float64) string { return money(pctPerHour/100*l.Total*24, l.Unit) + "/day" }
+		s := perDay(f.AvgRate) + " avg"
+		if f.HasRecent {
+			s = perDay(f.RecentRate) + " now, " + s
+		}
+		if f.Verdict != Maxed {
+			s += " · budget " + perDay(f.SafeRate)
+		}
+		return s
+	}
 	if f.Verdict == Idle || f.Left == 0 {
-		if l.Window > 0 {
+		switch {
+		case !l.ResetsAt.IsZero():
+			return "nothing used yet"
+		case l.Window > 0:
 			return humanDur(l.Window) + " window · starts with your next message"
 		}
 		return ""
 	}
-	s := rate(f.AvgRate) + " avg"
+	r := func(v float64) string { return rateFor(l, v) }
+	s := r(f.AvgRate) + " avg"
 	if f.HasRecent {
-		s = rate(f.RecentRate) + " now, " + s
+		s = r(f.RecentRate) + " now, " + s
 	}
 	if f.Verdict != Maxed {
-		s += " · budget " + rate(f.SafeRate)
+		s += " · budget " + r(f.SafeRate)
+	}
+	return s
+}
+
+// rateFor shows a pace per hour, or per day for windows of a week or more.
+func rateFor(l Limit, perHour float64) string {
+	if l.Window >= 7*24*time.Hour {
+		v := perHour * 24
+		if v < 10 {
+			return fmt.Sprintf("%.1f%%/day", v)
+		}
+		return fmt.Sprintf("%.0f%%/day", v)
+	}
+	return rate(perHour)
+}
+
+// countText is "79 / 2,000 completions" for limits the provider counts.
+func countText(l Limit) string {
+	if l.Kind != KindWindow || l.Total <= 0 || l.Unit == "" {
+		return ""
+	}
+	return commas(l.Amount) + " / " + commas(l.Total) + " " + l.Unit
+}
+
+// valueText is the number beside the bar: percent used, or for a balance or
+// a month's spend without a budget, the amount.
+func valueText(l Limit) string {
+	if l.Kind == KindBalance || (l.Kind == KindSpend && l.Total <= 0) {
+		return money(l.Amount, l.Unit)
+	}
+	return pct(l.Used)
+}
+
+var currencySymbol = map[string]string{"USD": "$", "CNY": "¥", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
+// money formats an amount with its currency: "$12.40", "¥1,250", "8.20 CHF".
+func money(v float64, unit string) string {
+	neg := ""
+	if v < 0 {
+		neg, v = "-", -v
+	}
+	var s string
+	switch {
+	case v >= 1000:
+		s = commas(v)
+	case v >= 100:
+		s = fmt.Sprintf("%.0f", v)
+	default:
+		s = fmt.Sprintf("%.2f", v)
+	}
+	if sym, ok := currencySymbol[strings.ToUpper(unit)]; ok {
+		return neg + sym + s
+	}
+	return strings.TrimSpace(neg + s + " " + unit)
+}
+
+// commas rounds to a whole number and groups the thousands: 12,345.
+func commas(v float64) string {
+	s := fmt.Sprintf("%.0f", math.Round(v))
+	neg := strings.HasPrefix(s, "-")
+	s = strings.TrimPrefix(s, "-")
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	if neg {
+		return "-" + s
 	}
 	return s
 }

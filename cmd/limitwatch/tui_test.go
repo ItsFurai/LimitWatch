@@ -76,7 +76,8 @@ func TestScreenshot(t *testing.T) {
 	}
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	lipgloss.SetHasDarkBackground(true)
-	m := demoModel(t, 118, 23)
+	m := demoModel(t, 118, 80)
+	m = feed(m, tea.WindowSizeMsg{Width: 118, Height: len(m.(model).bodyLines()) + 2})
 	if err := os.WriteFile(filepath.Join(out, "dashboard.ansi"), []byte(m.View()), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ type codexAuth struct {
 	} `json:"tokens"`
 }
 
-func fetchCodex(ctx context.Context) Report {
+func fetchCodex(ctx context.Context, _ Provider) Report {
 	r := Report{Provider: "Codex", Fetched: time.Now()}
 	var auth codexAuth
 	b, err := os.ReadFile(filepath.Join(codexHome(), "auth.json"))

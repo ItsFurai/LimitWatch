@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
+- **Nine more providers:** GitHub Copilot (monthly quotas, through the GitHub CLI), Gemini CLI (daily quotas per model), Kimi Code (5-hour and weekly quotas), Z.ai / Zhipu GLM Coding Plan, the DeepSeek, Kimi (Moonshot) and OpenRouter balances, and OpenAI and Anthropic API spend this month.
+- **Balances:** prepaid credit shows the amount left, a week of history, and how long it lasts at your spending over the last week. Top-ups don't count as spending.
+- **API spend** can have a monthly budget (`limitwatch budget openai-api 100`), which turns it into a limit with a forecast; without one, limitwatch projects the month's total.
+- **API keys** from environment variables or `limitwatch key set <provider>`, which asks for the key without echoing it and saves it readable only by you. `key list` and `key remove` manage them, and `key <provider>` does the same in the dashboard.
+- `limitwatch providers` lists every provider and whether it's set up. Providers that aren't are hidden and named on one line.
+- Counted quotas show their count, such as `79 / 2,000 completions`, and windows of a week or more show their pace per day.
 - **A command bar** in the dashboard: press `:` or `/` to type `refresh`, `provider codex`, `every 30s`, `login claude`, `login codex`, `help` or `quit`, with tab completion and history. `!<command>` runs any shell command and comes back afterward.
 - **Running apps:** each provider shows which of its apps are open (the Claude desktop app, Claude Code, Codex, the ChatGPT app), and a limit that can't be read comes with the next step to fix it, in the dashboard, `status` and `--json`.
 - **Instant updates:** the dashboard refreshes within a couple of seconds when Claude Code refreshes its sign-in or Codex logs a new message.
@@ -13,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Changed
 - When the live Codex check fails, a reading from Codex's log in the last 15 minutes is shown as current; older readings carry a warning that they may be out of date.
 - Errors are shorter, and the steps to fix them moved to their own line.
+- `--provider` also shows providers that aren't set up, with how to set them up.
 
 ## [0.1.0] - 2026-10-10
 

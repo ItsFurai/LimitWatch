@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 )
@@ -114,6 +115,30 @@ func (r Running) hint(rep Report, tui bool) string {
 		default:
 			return title(codex) + " to sign in."
 		}
+	case "Gemini":
+		return title(login("gemini", "gemini")) + " to open Gemini CLI, which refreshes its sign-in."
+	case "Copilot":
+		return title(login("copilot", "gh auth login")) + " to sign in to GitHub."
 	}
-	return ""
+	p, err := findProviderByName(rep.Provider)
+	if err != nil || !usesKey(p) {
+		return ""
+	}
+	set := "run `limitwatch key set " + p.Key + "`"
+	if tui {
+		set = "type `key " + p.Key + "`"
+	}
+	if rep.Missing {
+		return title(set) + ", or set " + strings.Join(p.KeyEnv, " or ") + "."
+	}
+	return "If the key is wrong or revoked, " + set + " to replace it."
+}
+
+func findProviderByName(name string) (Provider, error) {
+	for _, p := range providers {
+		if p.Name == name {
+			return p, nil
+		}
+	}
+	return Provider{}, errors.New("no provider " + name)
 }

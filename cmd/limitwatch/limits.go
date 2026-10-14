@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,14 +15,33 @@ import (
 	"time"
 )
 
-// Limit is one usage window of a plan, such as Claude's 5-hour session.
+// Limit is one thing that can run out: a usage window of a plan (Claude's
+// 5-hour session), a prepaid balance (DeepSeek credit), or a month's API
+// spend against a budget.
 type Limit struct {
 	ID       string        `json:"id"`   // stable key for history, e.g. "claude/five_hour"
 	Name     string        `json:"name"` // shown in the UI, e.g. "Session"
-	Used     float64       `json:"used"` // percent of the window used, 0–100
+	Kind     LimitKind     `json:"kind,omitempty"`
+	Used     float64       `json:"used"` // percent of the window (or budget) used, 0–100
 	Window   time.Duration `json:"-"`
-	ResetsAt time.Time     `json:"resets_at"` // zero when the window hasn't started
+	ResetsAt time.Time     `json:"resets_at"` // zero when the window hasn't started, or never resets
+
+	// Optional amounts, in Unit ("USD", "CNY", "requests", …):
+	//   window:  Amount used of Total, when the provider counts (Copilot's 79 of 2,000)
+	//   balance: Amount left
+	//   spend:   Amount spent this month, of a Total budget (0 = no budget)
+	Unit   string  `json:"unit,omitempty"`
+	Amount float64 `json:"amount,omitempty"`
+	Total  float64 `json:"total,omitempty"`
 }
+
+type LimitKind string
+
+const (
+	KindWindow  LimitKind = ""
+	KindBalance LimitKind = "balance"
+	KindSpend   LimitKind = "spend"
+)
 
 // MarshalJSON writes the window in seconds, which is friendlier to scripts
 // than Go's nanoseconds.
@@ -60,14 +81,26 @@ type Report struct {
 }
 
 type Provider struct {
-	Key   string // used by --provider
-	Name  string
-	Fetch func(ctx context.Context) Report
+	Key    string // used by --provider, `key set` and `budget`
+	Name   string
+	About  string   // one line for the help and README
+	KeyEnv []string // environment variables for its API key; empty if it uses an app's sign-in
+	Budget bool     // reports API spend, which can have a monthly budget
+	Fetch  func(ctx context.Context, p Provider) Report
 }
 
 var providers = []Provider{
-	{"claude", "Claude", fetchClaude},
-	{"codex", "Codex", fetchCodex},
+	{Key: "claude", Name: "Claude", About: "Claude Pro / Max plan limits, from Claude Code's sign-in", Fetch: fetchClaude},
+	{Key: "codex", Name: "Codex", About: "ChatGPT plan limits for Codex, from Codex's sign-in", Fetch: fetchCodex},
+	{Key: "copilot", Name: "Copilot", About: "GitHub Copilot monthly quotas, from the GitHub CLI's sign-in", Fetch: fetchCopilot},
+	{Key: "gemini", Name: "Gemini", About: "Gemini CLI / Code Assist daily quotas, from Gemini CLI's sign-in", Fetch: fetchGemini},
+	{Key: "kimi", Name: "Kimi Code", About: "Kimi Code membership quotas", KeyEnv: []string{"KIMI_CODE_API_KEY"}, Fetch: fetchKimiCode},
+	{Key: "zai", Name: "Z.ai", About: "Z.ai / Zhipu GLM Coding Plan quotas", KeyEnv: []string{"ZAI_API_KEY", "ZHIPU_API_KEY"}, Fetch: fetchZai},
+	{Key: "deepseek", Name: "DeepSeek", About: "DeepSeek API balance", KeyEnv: []string{"DEEPSEEK_API_KEY"}, Fetch: fetchDeepSeek},
+	{Key: "moonshot", Name: "Kimi API", About: "Kimi (Moonshot) API balance", KeyEnv: []string{"MOONSHOT_API_KEY", "KIMI_API_KEY"}, Fetch: fetchMoonshot},
+	{Key: "openrouter", Name: "OpenRouter", About: "OpenRouter credits and key limit", KeyEnv: []string{"OPENROUTER_API_KEY"}, Fetch: fetchOpenRouter},
+	{Key: "openai-api", Name: "OpenAI API", About: "OpenAI API spend this month (admin key)", KeyEnv: []string{"OPENAI_ADMIN_KEY"}, Budget: true, Fetch: fetchOpenAISpend},
+	{Key: "anthropic-api", Name: "Anthropic API", About: "Claude API spend this month (admin key)", KeyEnv: []string{"ANTHROPIC_ADMIN_KEY"}, Budget: true, Fetch: fetchAnthropicSpend},
 }
 
 // errMissing marks a provider that isn't set up on this machine.
@@ -100,7 +133,7 @@ func selectProviders(list string) ([]Provider, error) {
 			}
 		}
 		if !found {
-			return nil, errors.New("unknown provider " + k + " (choose from claude, codex)")
+			return nil, errors.New("unknown provider " + k + " (choose from " + providerKeys(nil) + ")")
 		}
 	}
 	return out, nil
@@ -132,7 +165,7 @@ func fetchAll(ctx context.Context, ps []Provider, maxAge time.Duration) []Report
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			reports[i] = p.Fetch(ctx)
+			reports[i] = p.Fetch(ctx, p)
 			reports[i].Provider = p.Name
 		}()
 	}
@@ -217,13 +250,51 @@ func saveCache(reports []Report) error {
 
 var httpClient = &http.Client{Timeout: 15 * time.Second}
 
+// getJSON sends a request with the given headers and decodes a 200 reply
+// into out. A body of nil means GET; otherwise it's POSTed as JSON.
+func getJSON(ctx context.Context, url string, headers map[string]string, body any, out any) error {
+	method, rd := http.MethodGet, io.Reader(nil)
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		method, rd = http.MethodPost, bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, url, rd)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "limitwatch/"+version)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return errors.New("can't reach " + req.URL.Host + ": " + shortNetErr(err))
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode != http.StatusOK {
+		return statusError(resp.StatusCode)
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return errors.New("unexpected reply from " + req.URL.Host + ": " + err.Error())
+	}
+	return nil
+}
+
 // statusError turns an HTTP failure into a short message for the UI.
 func statusError(code int) error {
 	switch {
 	case code == http.StatusUnauthorized:
-		return errors.New("sign-in expired or revoked")
+		return errors.New("sign-in or API key expired, revoked or wrong (HTTP 401)")
 	case code == http.StatusForbidden:
-		return errors.New("the usage API refused the sign-in (HTTP 403)")
+		return errors.New("the usage API refused the sign-in or key (HTTP 403)")
 	case code == http.StatusTooManyRequests:
 		return errors.New("usage API is rate limiting requests; try again in a minute")
 	case code >= 500:

@@ -25,6 +25,17 @@ func demoReports(now time.Time) []Report {
 				{ID: "codex/secondary", Name: "Weekly", Used: 12, Window: 7 * 24 * h, ResetsAt: now.Add(5*24*h + 2*h)},
 			},
 		},
+		{
+			Provider: "Copilot", Plan: "Pro", Fetched: now,
+			Limits: []Limit{
+				{ID: "copilot/premium_interactions", Name: "Premium", Used: 58, Window: 31 * 24 * h, ResetsAt: now.Add(17 * 24 * h),
+					Unit: "requests", Amount: 174, Total: 300},
+			},
+		},
+		{
+			Provider: "DeepSeek", Plan: "$2.00 of it granted", Fetched: now,
+			Limits: []Limit{{ID: "deepseek/usd", Name: "Balance", Kind: KindBalance, Unit: "USD", Amount: 12.40}},
+		},
 	}
 }
 
@@ -35,6 +46,18 @@ func demoHistory(reports []Report, now time.Time) History {
 	h := History{}
 	for _, r := range reports {
 		for _, l := range r.Limits {
+			if l.Kind == KindBalance {
+				// A week of spending about $1.30 a day, after a $10 top-up four days ago.
+				for i := 0; i <= 56; i++ {
+					ago := time.Duration(56-i) * 3 * time.Hour
+					amt := l.Amount + 1.3*ago.Hours()/24
+					if ago > 4*24*time.Hour {
+						amt -= 10
+					}
+					h[l.ID] = append(h[l.ID], Sample{T: now.Add(-ago).Unix(), ID: l.ID, Amount: amt})
+				}
+				continue
+			}
 			start := l.ResetsAt.Add(-l.Window)
 			elapsed := now.Sub(start)
 			steps := 60

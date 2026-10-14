@@ -45,6 +45,9 @@ type model struct {
 
 	// When Claude Code's sign-in file or Codex's newest log last changed.
 	stampClaude, stampCodex time.Time
+
+	explicit bool   // providers were picked by name, so show them even when not set up
+	keyFor   string // the provider whose API key the bar is asking for, hidden as it's typed
 }
 
 func newModel(ps []Provider, every time.Duration) model {
@@ -58,6 +61,12 @@ func newModel(ps []Provider, every time.Duration) model {
 	if !demoMode {
 		m.stampClaude, m.stampCodex = sourceStamps()
 	}
+	return m
+}
+
+func newModelFor(ps []Provider, every time.Duration, explicit bool) model {
+	m := newModel(ps, every)
+	m.explicit = explicit
 	return m
 }
 
@@ -169,28 +178,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) closeBar() {
+	m.cmdOn, m.keyFor = false, ""
+	m.input.Blur()
+	m.input.SetValue("")
+	m.input.EchoMode = textinput.EchoNormal
+	m.input.Placeholder = "type a command, or help"
+}
+
+// askKey turns the command bar into a hidden prompt for a provider's key.
+func (m *model) askKey(p Provider) tea.Cmd {
+	m.cmdOn, m.keyFor = true, p.Key
+	m.input.SetValue("")
+	m.input.EchoMode = textinput.EchoPassword
+	m.input.EchoCharacter = '•'
+	m.input.Placeholder = "paste the " + p.Name + " API key and press enter"
+	return m.input.Focus()
+}
+
 // commandKey handles typing in the command bar.
 func (m model) commandKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+c":
-		m.cmdOn = false
-		m.input.Blur()
+		m.closeBar()
 		return m, nil
 	case "enter":
 		line := strings.TrimSpace(m.input.Value())
-		m.cmdOn = false
-		m.input.Blur()
-		m.input.SetValue("")
+		if m.keyFor != "" {
+			// A key never goes into the command history.
+			provider := m.keyFor
+			m.closeBar()
+			if err := setKey(provider, line); err != nil {
+				return m, m.setFlash(err.Error(), true)
+			}
+			m.setFlash("saved the "+provider+" key in "+configPath(), false)
+			m.explicit = m.explicit || len(m.ps) < len(providers)
+			return m.refresh()
+		}
+		m.closeBar()
 		if line != "" && (len(m.cmdHist) == 0 || m.cmdHist[len(m.cmdHist)-1] != line) {
 			m.cmdHist = append(m.cmdHist, line)
 		}
 		return m.runCommand(line)
 	case "tab":
+		if m.keyFor != "" {
+			return m, nil
+		}
 		m.input.SetValue(complete(m.input.Value()))
 		m.input.CursorEnd()
 		return m, nil
 	case "up", "down":
-		if len(m.cmdHist) == 0 {
+		if len(m.cmdHist) == 0 || m.keyFor != "" {
 			return m, nil
 		}
 		if msg.String() == "up" {
@@ -240,12 +278,20 @@ func (m model) bodyLines() []string {
 		return centerMsg(m.h-2, m.w, sKey.Render(spinner(m.frame))+sDim.Render(" checking your limits…"))
 	}
 	now := m.now()
+	shown, missing := visible(m.reports, m.explicit)
 	var lines []string
-	for _, r := range m.reports {
+	if len(shown) == 0 {
+		lines = append(lines, "", sDim.Render(" No providers are set up yet. Sign in to Claude Code, Codex, the GitHub CLI or"),
+			sDim.Render(" Gemini CLI, or add an API key with ")+sKey.Render("key deepseek")+sDim.Render(" (or kimi, zai, moonshot, openrouter, …)."))
+	}
+	for _, r := range shown {
 		inner := reportLines(r, m.hist, now, m.w-2)
 		inner = append([]string{""}, append(inner, "")...)
 		box := drawBox(r.Provider, reportInfo(r), inner, m.w, len(inner)+2, !r.Missing && r.Err == "")
 		lines = append(lines, strings.Split(box, "\n")...)
+	}
+	if line := notSetUp(missing); line != "" {
+		lines = append(lines, line)
 	}
 	return lines
 }
@@ -274,8 +320,16 @@ func (m model) headerView() string {
 
 func (m model) footerView() string {
 	if m.cmdOn {
-		prompt := lipgloss.NewStyle().Foreground(cAccent).Bold(true).Render(" ❯ ")
-		right := sFaint.Render(strings.Join(suggestions(m.input.Value()), "  ")) + "  " +
+		label := " ❯ "
+		if m.keyFor != "" {
+			label = " key for " + m.keyFor + " ❯ "
+		}
+		prompt := lipgloss.NewStyle().Foreground(cAccent).Bold(true).Render(label)
+		hints := suggestions(m.input.Value())
+		if m.keyFor != "" {
+			hints = []string{"saved only on this computer"}
+		}
+		right := sFaint.Render(strings.Join(hints, "  ")) + "  " +
 			sKey.Render("tab") + sFaint.Render(" complete  ") + sKey.Render("esc") + sFaint.Render(" cancel ")
 		m.input.Width = max(10, m.w-lipgloss.Width(prompt)-lipgloss.Width(right)-2)
 		return padBetween(prompt+m.input.View(), right, m.w)
@@ -414,8 +468,8 @@ func spinner(frame int) string {
 	return f[frame%len(f)]
 }
 
-func runTUI(ps []Provider, every time.Duration) error {
+func runTUI(ps []Provider, every time.Duration, explicit bool) error {
 	inDashboard = true
-	_, err := tea.NewProgram(newModel(ps, every), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	_, err := tea.NewProgram(newModelFor(ps, every, explicit), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }

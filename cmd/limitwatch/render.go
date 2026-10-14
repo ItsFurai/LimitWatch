@@ -12,9 +12,13 @@ import (
 	"github.com/charmbracelet/x/term"
 )
 
-const nameW = 14
+const (
+	nameW  = 14
+	valueW = 7 // "78%", "$12.40", "¥1,250"
+	gapW   = 2 + valueW + 2
+)
 
-func barWidth(w int) int { return max(10, min(32, w-nameW-8-72)) }
+func barWidth(w int) int { return max(10, min(32, w-nameW-gapW-72)) }
 
 // limitLines renders one limit as two lines:
 //
@@ -27,8 +31,18 @@ func limitLines(l Limit, f Forecast, samples []Sample, now time.Time, w int) []s
 	bw := barWidth(w)
 	c := lipgloss.NewStyle().Foreground(verdictColor(f.Verdict))
 	name := ansi.Truncate(l.Name, nameW-2, "…")
-	first := " " + sBold.Render(fmt.Sprintf("%-*s", nameW-1, name)) + bar(l, f, bw) + "  " +
-		sText.Render(fmt.Sprintf("%4s", pct(l.Used))) + "  " + c.Render(verdictText(l, f))
+	shown, line := l, timeline(l, f, samples, now, bw)
+	if l.Kind == KindBalance {
+		// A balance's bar is how much of the week's highest balance is left.
+		peak := balancePeak(l, samples, now)
+		shown.Used = l.Amount / peak * 100
+		line = balanceTimeline(l, f, samples, now, peak, bw)
+	}
+	first := " " + sBold.Render(fmt.Sprintf("%-*s", nameW-1, name)) + bar(shown, f, bw) + "  " +
+		sText.Render(fmt.Sprintf("%*s", valueW, valueText(l))) + "  " + c.Render(verdictText(l, f))
+	if n := countText(l); n != "" {
+		first += sDim.Render(" · " + n)
+	}
 
 	var info []string
 	if f.Left > 0 {
@@ -37,7 +51,7 @@ func limitLines(l Limit, f Forecast, samples []Sample, now time.Time, w int) []s
 	if p := paceText(l, f); p != "" {
 		info = append(info, sDim.Render(p))
 	}
-	second := " " + strings.Repeat(" ", nameW-1) + timeline(l, f, samples, now, bw) + "        " +
+	second := " " + strings.Repeat(" ", nameW-1) + line + strings.Repeat(" ", gapW) +
 		sDim.Render(strings.Join(info, sFaint.Render(" · ")))
 	return []string{ansi.Truncate(first, w, "…"), ansi.Truncate(second, w, "…")}
 }
@@ -84,6 +98,47 @@ func timeline(l Limit, f Forecast, samples []Sample, now time.Time, w int) strin
 			k := int(math.Round(level[i] / 100 * float64(len(sparks)-1)))
 			b.WriteString(c.Render(string(sparks[max(0, min(len(sparks)-1, k))])))
 		}
+	}
+	return b.String()
+}
+
+func balancePeak(l Limit, samples []Sample, now time.Time) float64 {
+	peak := l.Amount
+	for _, s := range samples {
+		if !s.Time().Before(now.Add(-balanceLookback)) {
+			peak = math.Max(peak, s.Amount)
+		}
+	}
+	return math.Max(peak, 1e-9)
+}
+
+// balanceTimeline is the last week of a balance, oldest on the left, scaled
+// to its highest point.
+func balanceTimeline(l Limit, f Forecast, samples []Sample, now time.Time, peak float64, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	start := now.Add(-balanceLookback)
+	cell := balanceLookback / time.Duration(w)
+	level := make([]float64, w)
+	for i := range level {
+		level[i] = -1
+	}
+	for _, s := range samples {
+		if i := int(s.Time().Sub(start) / cell); i >= 0 && i < w {
+			level[i] = s.Amount / peak * 100 // the latest reading in each cell
+		}
+	}
+	level[w-1] = l.Amount / peak * 100
+	c := lipgloss.NewStyle().Foreground(verdictColor(f.Verdict)).Faint(true)
+	var b strings.Builder
+	for _, v := range level {
+		if v < 0 {
+			b.WriteString(sFaint.Render("·"))
+			continue
+		}
+		k := int(math.Round(v / 100 * float64(len(sparks)-1)))
+		b.WriteString(c.Render(string(sparks[max(0, min(len(sparks)-1, k))])))
 	}
 	return b.String()
 }
@@ -160,7 +215,10 @@ func renderStatusline(reports []Report, hist History, now time.Time) string {
 		for _, l := range r.Limits {
 			f := Predict(l, hist.inWindow(l), now)
 			c := lipgloss.NewStyle().Foreground(verdictColor(f.Verdict))
-			s := sDim.Render(shortWindow(l)+" ") + c.Render(pct(l.Used))
+			s := c.Render(valueText(l))
+			if short := shortWindow(l); short != "" {
+				s = sDim.Render(short+" ") + s
+			}
 			switch f.Verdict {
 			case RunsOut:
 				s += c.Render(" ⚠" + humanDur(f.EmptyIn))
@@ -182,11 +240,14 @@ func renderStatusline(reports []Report, hist History, now time.Time) string {
 
 // shortWindow names a limit in two or three characters for the status line.
 func shortWindow(l Limit) string {
-	short := map[string]string{"Weekly Opus": "op", "Weekly Sonnet": "so", "Weekly apps": "ap"}
+	short := map[string]string{"Weekly Opus": "op", "Weekly Sonnet": "so", "Weekly apps": "ap", "Premium": "pr",
+		"Chat": "ch", "Completions": "co", "Monthly tools": "tl", "Key limit": "key"}
 	if s, ok := short[l.Name]; ok {
 		return s
 	}
 	switch {
+	case l.Kind == KindBalance, l.Kind == KindSpend:
+		return ""
 	case l.Window == 0:
 		return strings.ToLower(l.Name[:min(2, len(l.Name))])
 	case l.Window < 24*time.Hour:

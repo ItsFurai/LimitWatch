@@ -59,7 +59,7 @@ func loadClaudeCreds() (claudeCreds, error) {
 	return f.OAuth, nil
 }
 
-func fetchClaude(ctx context.Context) Report {
+func fetchClaude(ctx context.Context, _ Provider) Report {
 	creds, err := loadClaudeCreds()
 	if err != nil {
 		return failed("Claude", err)

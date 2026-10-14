@@ -77,7 +77,7 @@ func TestFetchClaude(t *testing.T) {
 	claudeUsageURL = srv.URL
 	defer func() { claudeUsageURL = old }()
 
-	r := fetchClaude(context.Background())
+	r := fetchClaude(context.Background(), providers[0])
 	if r.Err != "" || len(r.Limits) != 1 || r.Plan != "Pro" {
 		t.Fatalf("report %+v", r)
 	}
@@ -86,12 +86,12 @@ func TestFetchClaude(t *testing.T) {
 	}
 
 	status = http.StatusUnauthorized
-	if r := fetchClaude(context.Background()); !strings.Contains(r.Err, "sign-in expired") {
+	if r := fetchClaude(context.Background(), providers[0]); !strings.Contains(r.Err, "HTTP 401") {
 		t.Fatalf("401 → %q", r.Err)
 	}
 
 	os.Remove(filepath.Join(dir, ".credentials.json"))
-	if r := fetchClaude(context.Background()); !r.Missing {
+	if r := fetchClaude(context.Background(), providers[0]); !r.Missing {
 		t.Fatalf("no credentials → %+v", r)
 	}
 }

@@ -24,6 +24,10 @@ var commands = []struct{ name, desc string }{
 	{"every 30s", "refresh every 30s (minimum), 1m, 5m, …"},
 	{"login claude", "open Claude Code here to refresh its sign-in"},
 	{"login codex", "run `codex login` here"},
+	{"login gemini", "open Gemini CLI here to refresh its sign-in"},
+	{"login copilot", "run `gh auth login` here"},
+	{"key <provider>", "add an API key: deepseek, kimi, moonshot, zai, openrouter, openai-api, anthropic-api"},
+	{"budget <provider> <usd>", "a monthly budget for openai-api or anthropic-api (0 removes it)"},
 	{"!<command>", "run a shell command, then come back"},
 	{"help", "this screen"},
 	{"quit", "leave limitwatch (also: q, exit)"},
@@ -65,7 +69,7 @@ func (m model) runCommand(line string) (model, tea.Cmd) {
 		if err != nil {
 			return m, m.setFlash(err.Error(), true)
 		}
-		m.ps = ps
+		m.ps, m.explicit = ps, arg != ""
 		m.reports = filterReports(m.reports, ps)
 		return m.refresh()
 	case "every":
@@ -77,6 +81,30 @@ func (m model) runCommand(line string) (model, tea.Cmd) {
 		return m, m.setFlash("refreshing every "+humanDur(d), false)
 	case "login":
 		return m.login(arg)
+	case "key", "keys":
+		if len(fields) < 2 {
+			return m, m.setFlash("key for which provider? "+providerKeys(usesKey), true)
+		}
+		p, err := findProvider(fields[1])
+		if err != nil {
+			return m, m.setFlash(err.Error(), true)
+		}
+		if !usesKey(p) {
+			return m, m.setFlash(p.Name+" uses its app's sign-in; try login "+p.Key, true)
+		}
+		if len(fields) > 2 {
+			return m, m.setFlash("type just `key "+p.Key+"`; the key is asked for next, hidden", true)
+		}
+		return m, m.askKey(p)
+	case "budget":
+		if len(fields) != 3 {
+			return m, m.setFlash("budget needs a provider and an amount, such as budget openai-api 100", true)
+		}
+		if err := setBudget(fields[1], fields[2]); err != nil {
+			return m, m.setFlash(err.Error(), true)
+		}
+		m.setFlash("budget saved", false)
+		return m.refresh()
 	}
 	return m, m.setFlash(fmt.Sprintf("unknown command %q; type help to see them all", fields[0]), true)
 }
@@ -111,18 +139,25 @@ func (m model) login(which string) (model, tea.Cmd) {
 		bin = "claude"
 	case "codex":
 		bin, args = "codex", []string{"login"}
+	case "gemini":
+		bin = "gemini"
+	case "copilot", "github", "gh":
+		bin, args = "gh", []string{"auth", "login"}
 	default:
-		return m, m.setFlash("login what? type login claude or login codex", true)
+		return m, m.setFlash("login what? claude, codex, gemini or copilot", true)
 	}
 	path, err := exec.LookPath(bin)
 	if err != nil {
-		if which == "claude" {
-			return m, m.setFlash("Claude Code isn't on your PATH; install it from claude.com/claude-code", true)
+		install := map[string]string{
+			"claude": "Claude Code isn't on your PATH; install it from claude.com/claude-code",
+			"codex":  "Codex isn't on your PATH; install it with npm install -g @openai/codex",
+			"gemini": "Gemini CLI isn't on your PATH; install it with npm install -g @google/gemini-cli",
+			"gh":     "the GitHub CLI isn't on your PATH; install it from cli.github.com",
 		}
-		return m, m.setFlash("Codex isn't on your PATH; install it with npm install -g @openai/codex", true)
+		return m, m.setFlash(install[bin], true)
 	}
 	label := strings.Join(append([]string{bin}, args...), " ")
-	if which == "claude" {
+	if which == "claude" || which == "gemini" {
 		label += "  (it refreshes its sign-in on start; quit it with /exit to come back)"
 	}
 	return m, runPaused(label, exec.Command(path, args...))
@@ -215,7 +250,7 @@ func suggestions(line string) []string {
 	var out []string
 	for _, c := range commands {
 		name := c.name
-		if l == "" {
+		if l == "" || strings.Contains(name, "<") {
 			name = strings.Fields(name)[0] // just the verbs until something is typed
 		}
 		if strings.HasPrefix(name, l) && !contains(out, name) {

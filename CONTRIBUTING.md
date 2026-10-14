@@ -38,6 +38,8 @@ Everything lives in `cmd/limitwatch`:
 | `limits.go` | the `Limit` and `Report` types, fetching every provider, the cache |
 | `claude.go` | Claude: reading Claude Code's sign-in and the usage endpoint |
 | `codex.go` | Codex: reading Codex's sign-in, the usage endpoint and session logs |
+| `copilot.go`, `gemini.go`, `kimi.go`, `keyed.go`, `spend.go` | the other providers: Copilot, Gemini, Kimi Code and the Kimi API, Z.ai, DeepSeek, OpenRouter, and API spend |
+| `config.go` | saved API keys and budgets |
 | `procs.go`, `procs_*.go` | finding the Claude and ChatGPT apps that are running, and the hints based on them |
 | `history.go` | recorded readings |
 | `forecast.go` | paces, projections and verdicts |
@@ -48,7 +50,13 @@ Everything lives in `cmd/limitwatch`:
 
 ### Adding a provider
 
-Write a `fetchX(ctx) Report` that returns one `Limit` per usage window, with its percentage, window length and reset time, and add it to `providers` in `limits.go`. The forecast, history, dashboard and status line work from those fields, so nothing else needs to change. Return `errMissing` when the user isn't signed in, so the provider is shown dimmed rather than as an error, and add a parsing test with a sample reply.
+Write a `fetchX(ctx, p Provider) Report` and add it to `providers` in `limits.go`. It returns one `Limit` per thing that can run out:
+
+- a usage **window**: its percentage used, window length and reset time (and `Amount` / `Total` / `Unit` if the provider counts requests),
+- a **balance**: `Kind: KindBalance`, the `Amount` left and its currency in `Unit`, or
+- **spend**: `Kind: KindSpend`, built with `spendLimit`.
+
+The forecast, history, dashboard and status line work from those fields, so nothing else needs to change. For an API key, list its environment variables in `KeyEnv` and read it with `apiKey(p)`; `key set` then works for it automatically. Return `errMissing` (or `needKey(p)`) when the user isn't set up, so the provider is hidden rather than shown as an error, and add a test that serves a sample reply with `httptest`.
 
 ## Commit messages
 

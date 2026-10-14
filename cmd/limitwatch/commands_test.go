@@ -159,10 +159,10 @@ func TestCommandBar(t *testing.T) {
 }
 
 func TestSuggestionsAndComplete(t *testing.T) {
-	if got := strings.Join(suggestions(""), " "); got != "refresh provider every login !<command> help quit" {
+	if got := strings.Join(suggestions(""), " "); got != "refresh provider every login key budget !<command> help quit" {
 		t.Errorf("suggestions(\"\") = %q", got)
 	}
-	if got := strings.Join(suggestions("login"), ","); got != "login claude,login codex" {
+	if got := strings.Join(suggestions("login"), ","); got != "login claude,login codex,login gemini,login copilot" {
 		t.Errorf("suggestions(login) = %q", got)
 	}
 	if got := complete("login co"); got != "login codex" {
